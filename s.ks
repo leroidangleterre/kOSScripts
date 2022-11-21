@@ -1,22 +1,4 @@
 
-// Start autopilot at 1000m above ground level
-// set startAltitude to 100.
-// print "Waiting until ship's altitude reaches " + startAltitude + "m.".
-// wait until ship:altitude > startAltitude.
-// print "Altitude reached.".
-
-
-//print "Press + to start autopilot.".
-//set loop to true.
-//until loop = false{
-//	if terminal:input:haschar {
-//		set ch to terminal:input:getchar().
-//		if ch = "+" {
-//			print "Go !".
-//			set loop to true.
-//		}
-//	}
-//}
 
 clearscreen.
 print "Starting.".
@@ -33,9 +15,12 @@ print "Starting.".
 
 // Top perf: 6200m 640m/s
 
-set targetAlt to 400.
+set takeoffSpeed to 80.
+set targetAlt to 2000.
+set altitudeIncrement to 10.
 set targetVerticalSpeed to 10.
 set targetCruiseSpeed to 200.
+set speedIncrement to 10.
 set targetSpeed to targetCruiseSpeed.
 set targetCompass to 90.
 set terrainLatitude to -0.08726.
@@ -45,8 +30,9 @@ set dHeading to 5.
 
 print "Target alt: " + targetAlt + "; target speed: " + targetSpeed.
 
-//set phase to "climb".
+// set phase to "climb".
 set phase to "cruise".
+// set phase to "takeoff".
 
 sas off.
 
@@ -72,22 +58,26 @@ set dt to 0.3.
 // .01 .000 .08 stable
 // .015 .0  .15 stable at 1100m for 2000m
 
+
 // PID for altitude
 // Mach 2 Aircraft
 // set kPalt to 0.2. set kIalt to 0.005. set kDalt to 3.0.
 // Mach 3 Aircraft (3300m, 820m/s)
 // set kPalt to 0.28. set kIalt to 0.008. set kDalt to 0.8.
 // Tanker
-set kPalt to 0.2. set kIalt to 0.005. set kDalt to 0.9.
+// set kPalt to 0.2. set kIalt to 0.005. set kDalt to 0.9.
 // old tanker: set kPalt to 0.2. set kIalt to 0.005. set kDalt to 0.9.
 // Whiplash Mach 3
-// set kPalt to 0.15. set kIalt to 0.01. set kDalt to 0.40.
+set kPalt to 0.03. set kIalt to 0.0006. set kDalt to 0.5.
+// Airliner 6 segments
+// set kPalt to 0.1. set kIalt to 0.003. set kDalt to 1.0.
+
 
 set Ialt to 0.
 set Dalt to 0.
 set PaltPrev to targetAlt - ship:altitude.
 set prevAlt to 0.
-set tuneLimitAltitude to 3000. // 12.
+set tuneLimitAltitude to 9. // 12.
 set targetPitchTrimmed to 0.
 set maxPitch to 60.
 
@@ -126,40 +116,72 @@ set maxLength to 200.
 
 list engines in myEnginesList.
 
+
+declare function next {
+	parameter x.
+	if x >= 10 {
+		if(x >= 10000){
+			set newX to x + 1000.
+		}else{
+			set newX to x*2.
+		}
+		print "log x: " + log10(x) + ", log(newX): " + log10(newX).
+		set fx to floor(log10(x)).
+		set fxNext to floor(log10(newX)).
+		print "floors: " + fx + ", " + fxNext.
+		if(fx <> fxNext) {
+			set newX to 10^floor(log10(newX)).
+		}
+	}
+	else {
+		set newX to x+1.
+	}
+	return newX.
+}
+
+declare function previous {
+	parameter x.
+	if x = 0 {
+		return x.
+	}
+	if x >= 10 {
+		if(x >= 10000){
+			set newX to x - 1000.
+		}else{
+			set newX to x/2.
+		}
+		print "log x: " + log10(x) + ", log(newX): " + log10(newX).
+		set fx to floor(log10(x)).
+		set fxNext to floor(log10(newX)).
+		print "floors: " + fx + ", " + fxNext.
+		if(fx <> fxNext) {
+			set newX to 0.8*x.
+		}
+	}
+	else {
+		set newX to x-1.
+	}
+	return newX.
+}
+
+
 set exit to false.
 until exit = true{
 
 
-	if alt:radar > 300 {
-		gear off.
-		lights off.
-	}
-	else{
-		gear on.
-		lights on.
-	}
-
-
-	//if ship:bearing > 175 and ship:bearing < 185 and targetCompass = 0{
-	//	// We just crossed the North pole.
-	//	print "Passing North Pole.".
-	//	// set targetCompass to 180.
-	//
-	//f (ship:bearing > 355 or ship:bearing < 5) and targetCompass = 180{
-	//	if ship:latitude > 89.9 {
-	//		print "Going due south. Latitude: " + ship:latitude.
-	//		print "Passing South Pole.".
-	//		// We just crossed the South pole.
-	//		// set targetCompass to 0.
-	//	}
-	//
-
+	//if alt:radar > 300 {
+	//	gear off.
+	//	lights off.
+	//}
+	//else{
+	//	gear on.
+	//	lights on.
+	//}
 
 	set totalFuelFlow to 0.
 	for eng in myEnginesList {
 		set totalFuelFlow to totalFuelFlow + eng:fuelFlow.
 	}
-//	print "fuel flow: " + totalFuelFlow.
 	
 	
 	list resources in resourcesList.
@@ -178,9 +200,17 @@ until exit = true{
 		set phase to "cruise".
 		set targetSpeed to targetCruiseSpeed.
 	}
-
-	if phase = "climb" {
-	print "climb".
+	else if phase = "takeoff" {
+		// Gain speed
+		brakes off.
+		print "Takeoff, speed " + ship:velocity:surface:mag + ", aiming for " + takeoffSpeed.
+		if ship:velocity:surface:mag > takeoffSpeed {
+			print "Reaching almost takeoff speed".
+			set phase to "climb".
+		}
+	}
+	else if phase = "climb" {
+		print "climb".
 		// PID for vertical speed
 		set PvSpeedPrev to targetVerticalSpeed - prevVspeed.
 		set PvSpeed to targetVerticalSpeed - ship:verticalSpeed.
@@ -272,70 +302,28 @@ until exit = true{
 			print "New heading: " + targetCompass.
 		}
 
-		set altitudeIncrement to 100.
 		
 		set altiOrSpeedChanged to false.
 		if ch = terminal:input:DOWNCURSORONE {
 		
-			if targetAlt <= 400 {
-				set altitudeIncrement to 50.
-			}
-			if targetAlt <= 200 {
-				set altitudeIncrement to 10.
-			}
-		
-			set targetAlt to targetAlt - altitudeIncrement.
-			// set Ialt to 0. // TEST
+			set targetAlt to previous(targetAlt).
 			set altiOrSpeedChanged to true.
 		}
 		if ch = terminal:input:UPCURSORONE {
 
-			if targetAlt < 400 {
-				set altitudeIncrement to 50.
-			}
-			if targetAlt < 200 {
-				set altitudeIncrement to 10.
-			}
-
-			set targetAlt to targetAlt + altitudeIncrement.
-			// set Ialt to 0. // TEST
-			set altiOrSpeedChanged to true.
-		}
-		if ch = "1" {
-			set targetAlt to targetAlt + 1.
-			set altiOrSpeedChanged to true.
-		}
-		if ch = "0" {
-			set targetAlt to targetAlt - 1.
-			set altiOrSpeedChanged to true.
-		}
-		if ch = "+" {
-			if targetSpeed < 50 {
-				set targetSpeed to targetSpeed + 1.
-			}
-			else {
-				set targetSpeed to targetSpeed + 10.
-			}
-			set altiOrSpeedChanged to true.
-		}
-		if ch = "-" {
-			if targetSpeed <= 50 {
-				set targetSpeed to targetSpeed - 1.
-			}
-			else {
-				set targetSpeed to targetSpeed - 10.
-			}
+			set targetAlt to next(targetAlt).
 			set altiOrSpeedChanged to true.
 		}
 		
-		if ch = "*" {
-			set targetSpeed to targetSpeed + 100.
+		if ch = "+" {
+			set targetSpeed to next(targetSpeed).
 			set altiOrSpeedChanged to true.
 		}
-		if ch = "/" {
-			set targetSpeed to targetSpeed - 100.
+		if ch = "-" {
+			set targetSpeed to previous(targetSpeed).
 			set altiOrSpeedChanged to true.
 		}
+		
 		
 		if altiOrSpeedChanged {
 			print "Target altitude : " + targetAlt + "m; target speed: " + targetSpeed + "m/s.".
@@ -369,8 +357,8 @@ until exit = true{
 		if ch = "i" {
 			// Display the current value of the integral term.
 			print "Ialt: " + Ialt + ", kIalt * Ialt : " + kIalt * Ialt.
-			print "Ispeed: " + Ispeed + ", kIspeed * Ispeed: " + kIspeed * Ispeed.
-			print "Iroll: " + Iroll+ ", kIroll* Iroll: " + kIroll* Iroll.
+			// print "Ispeed: " + Ispeed + ", kIspeed * Ispeed: " + kIspeed * Ispeed.
+			// print "Iroll: " + Iroll+ ", kIroll* Iroll: " + kIroll* Iroll.
 		}
 		
 		if ch = "q" {
