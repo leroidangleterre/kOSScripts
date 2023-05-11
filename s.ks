@@ -19,12 +19,11 @@ set takeoffSpeed to 80.
 set altitudeIncrement to 10.
 set targetVerticalSpeed to 10.
 set speedIncrement to 10.
-// Cruise speed, targetAlt and heading are set after the PID coefficients.
+// Cruise speed, requestedAlt and heading are set after the PID coefficients.
 set terrainLatitude to -0.08726.
 set cruiseAltitudeMargin to 100.
 
 set dHeading to 5.
-
 
 // set phase to "climb".
 set phase to "cruise".
@@ -83,18 +82,23 @@ set dt to 0.3.
 // Quick
 set kPalt to 0.2. set kIalt to 0.003. set kDalt to 0.8.
 
-set targetCompass to 90.
-set targetCruiseSpeed to 220. // 1400
-set targetAlt to 700.
+set requestedHeading to 270.
+set headingForTarget to 0.
+set requestedCruiseSpeed to 220. // 1400
+set requestedAlt to 200.
+
+
+set aimAtTarget to false.
+
 
 set mustPrintPalt to false.
 
-set targetSpeed to targetCruiseSpeed.
-print "Target alt: " + targetAlt + "; speed: " + targetSpeed + "; heading: " + targetCompass.
+// set requestedCruiseSpeed to requestedCruiseSpeed.
+print "Target alt: " + requestedAlt + "; speed: " + requestedCruiseSpeed + "; heading: " + requestedHeading.
 
 set Ialt to 0.
 set Dalt to 0.
-set PaltPrev to targetAlt - ship:altitude.
+set PaltPrev to requestedAlt - ship:altitude.
 set prevAlt to 0.
 set tuneLimitAltitude to 100. // 12.
 set targetPitchTrimmed to 0.
@@ -214,10 +218,10 @@ until exit = true{
 		set range to remainingFlightDuration * ship:velocity:surface:mag.
 	}
 
-	if phase = "climb" and ship:altitude > targetAlt - cruiseAltitudeMargin {
-		print "Target altitude almost reached, starting cruise phase; target altitude: " + targetAlt + " m, target speed: " + targetCruiseSpeed + " m/s.".
+	if phase = "climb" and ship:altitude > requestedAlt - cruiseAltitudeMargin {
+		print "Target altitude almost reached, starting cruise phase; target altitude: " + requestedAlt + " m, requested speed: " + requestedCruiseSpeed + " m/s.".
 		set phase to "cruise".
-		set targetSpeed to targetCruiseSpeed.
+		// set requestedCruiseSpeed to requestedCruiseSpeed.
 	}
 	else if phase = "takeoff" {
 		// Gain speed
@@ -243,7 +247,7 @@ until exit = true{
 	else {
 	
 		// PID for altitude
-		set Palt to targetAlt - ship:altitude.
+		set Palt to requestedAlt - ship:altitude.
 		
 		// Initial way to compute integral term:
 		set Ialt to Ialt + Palt*dt.
@@ -263,7 +267,7 @@ until exit = true{
 		set targetPitch to kPalt * Palt + kIalt * Ialt + kDalt * Dalt.
 		
 		set prevAlt to ship:altitude.
-		set PaltPrev to targetAlt - ship:altitude.
+		set PaltPrev to requestedAlt - ship:altitude.
 	}
 	set targetPitchTrimmed to targetPitch.
 	// if targetPitchTrimmed > maxPitch {
@@ -279,8 +283,8 @@ until exit = true{
 
 
 	// PID for speed
-	set PspeedPrev to targetSpeed - prevSpeed.
-	set Pspeed to targetSpeed - ship:velocity:surface:mag.
+	set PspeedPrev to requestedCruiseSpeed - prevSpeed.
+	set Pspeed to requestedCruiseSpeed - ship:velocity:surface:mag.
 
 	set Ispeed to Ispeed + Pspeed*dt.
 
@@ -310,10 +314,24 @@ until exit = true{
 	set rollCommand to kProll * Proll + kIroll * Iroll + kDroll * Droll.
 	// print "roll command: " + rollCommand+ ", current: " + ship:facing:roll.
 	
-	lock steering to heading(targetCompass, targetPitchTrimmed). //, rollCommand).
+	if aimAtTarget {
+		
+		// Compute custom heading.
+		
+		set headingTowardTarget to 273.
+		print target:longitude + ", " + target:latitude + ", " + ship:longitude + ", " + ship:latitude.
+		lock steering to heading(headingTowardTarget, targetPitchTrimmed).
+	}
+	else {
+		
+		// Simply apply requested heading.
+		
+		lock steering to heading(requestedHeading, targetPitchTrimmed).
+	}
 	
 	// Speed and Altitude control:
 	// left, right: heading
+	// Keyboard 'T': set heading to target
 	// up, down: altitude
 	// Keypad plus, keypad minus: speed
 
@@ -321,18 +339,18 @@ until exit = true{
 	if terminal:input:haschar {
 		set ch to terminal:input:getchar().
 		if ch = terminal:input:LEFTCURSORONE {
-			set targetCompass to targetCompass - dHeading.
-			if targetCompass < 0 {
-				set targetCompass to targetCompass + 360.
+			set requestedHeading to requestedHeading - dHeading.
+			if requestedHeading < 0 {
+				set requestedHeading to requestedHeading + 360.
 			}
-			print "New heading: " + targetCompass.
+			print "New heading: " + requestedHeading.
 		}
 		if ch = terminal:input:RIGHTCURSORONE {
-			set targetCompass to targetCompass + dHeading.
-			if targetCompass >= 360 {
-				set targetCompass to targetCompass - 360.
+			set requestedHeading to requestedHeading + dHeading.
+			if requestedHeading >= 360 {
+				set requestedHeading to requestedHeading - 360.
 			}
-			print "New heading: " + targetCompass.
+			print "New heading: " + requestedHeading.
 		}
 		
 		
@@ -356,35 +374,45 @@ until exit = true{
 		set altiOrSpeedChanged to false.
 		if ch = terminal:input:DOWNCURSORONE {
 		
-			// set targetAlt to previous(targetAlt).
-			set targetAlt to targetAlt - altitudeIncrement.
+			// set requestedAlt to previous(requestedAlt).
+			set requestedAlt to requestedAlt - altitudeIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		if ch = terminal:input:UPCURSORONE {
 
-			// set targetAlt to next(targetAlt).
-			set targetAlt to targetAlt + altitudeIncrement.
+			// set requestedAlt to next(requestedAlt).
+			set requestedAlt to requestedAlt + altitudeIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		
 		if ch = "+" {
-			// set targetSpeed to next(targetSpeed).
-			set targetSpeed to targetSpeed + speedIncrement.
+			// set requestedCruiseSpeed to next(requestedCruiseSpeed).
+			set requestedCruiseSpeed to requestedCruiseSpeed + speedIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		if ch = "-" {
-			// set targetSpeed to previous(targetSpeed).
-			set targetSpeed to targetSpeed - speedIncrement.
+			// set requestedCruiseSpeed to previous(requestedCruiseSpeed).
+			set requestedCruiseSpeed to requestedCruiseSpeed - speedIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		
 		
 		if altiOrSpeedChanged {
-			print "Target altitude : " + targetAlt + "m; target speed: " + targetSpeed + "m/s.".
+			print "Target altitude : " + requestedAlt + "m; target speed: " + requestedCruiseSpeed + "m/s.".
 		}
 		
 		if ch = "l" {
 			print "Current latitude: " + ship:latitude.
+		}
+		
+		if ch = "t" {
+			if aimAtTarget {
+				print "Set fixed heading : " + requestedHeading.
+			}
+			else {
+				print "Set heading to target.".
+			}
+			set aimAtTarget to not aimAtTarget.
 		}
 		
 		if ch = "d" {
