@@ -82,13 +82,12 @@ set dt to 0.3.
 // Quick
 set kPalt to 0.2. set kIalt to 0.003. set kDalt to 0.8.
 
-set requestedHeading to 270.
-set headingForTarget to 0.
-set requestedCruiseSpeed to 220. // 1400
-set requestedAlt to 200.
+set requestedHeading to 180.
+set requestedCruiseSpeed to 900.
+set requestedAlt to 5000.
 
 
-set aimAtTarget to false.
+//set aimAtTarget to false.
 
 
 set mustPrintPalt to false.
@@ -139,6 +138,52 @@ set maxLength to 200.
 
 list engines in myEnginesList.
 
+declare function getHeadingForTarget {
+
+	if hastarget {
+		
+		set lambdaA to ship:longitude.
+		set phiA to ship:latitude.
+		set lambdaB to target:longitude.
+		set phiB to target:latitude.
+		
+		set TAX to V(-sin(lambdaA), cos(lambdaA), 0).
+		set TAY to V(-sin(phiA)*cos(lambdaA), -sin(phiA)*sin(lambdaA), cos(phiA)).
+		
+		set R to 600000.
+		
+		set PNx to 0.
+		set PNy to R*cos(phiA).
+		
+		set PBx to -R*cos(lambdaB)*cos(phiB)*sin(lambdaA) + R*sin(lambdaB)*cos(phiB)*cos(lambdaA).
+		set PBy to -R*cos(lambdaB)*cos(phiB)*sin(phiA)*cos(lambdaA) - R*sin(lambdaB)*cos(phiB)*sin(phiA)*sin(lambdaA) + R*sin(phiB)*cos(phiA).
+		
+		
+		set K to PBX / sqrt( PBx*PBx + PBy*PBy).
+		
+		if PBx > 0 and PBy > 0 {
+			set targetHeading to arcsin(K).
+		}
+		else if PBx > 0 and PBy < 0 {
+			set targetHeading to arcsin(-K) + 180.
+		}
+		else if PBx < 0 and PBy > 0 {
+			set targetHeading to arcsin(K).
+		}
+		else {
+			// PBx < 0 and PBy < 0
+			set targetHeading to 180 - arcsin(K).
+		}
+		
+		print "K: " + K + ", target heading: " + targetHeading.
+		return targetHeading.
+		
+	}
+	else {
+		print "No target. Ship current heading: " + (-ship:bearing).
+		return -ship:bearing.
+	}
+}
 
 declare function next {
 	parameter x.
@@ -191,21 +236,10 @@ declare function previous {
 set exit to false.
 until exit = true{
 
-
-	//if alt:radar > 300 {
-	//	gear off.
-	//	lights off.
-	//}
-	//else{
-	//	gear on.
-	//	lights on.
-	//}
-
 	set totalFuelFlow to 0.
 	for eng in myEnginesList {
 		set totalFuelFlow to totalFuelFlow + eng:fuelFlow.
 	}
-	
 	
 	list resources in resourcesList.
 	for res in resourcesList {
@@ -270,17 +304,6 @@ until exit = true{
 		set PaltPrev to requestedAlt - ship:altitude.
 	}
 	set targetPitchTrimmed to targetPitch.
-	// if targetPitchTrimmed > maxPitch {
-	// 	set targetPitchTrimmed to maxPitch.
-	// 	print "targetPitch = " + targetPitch + ", targetPitchTrimmed = " + targetPitchTrimmed.
-	// }
-	// if targetPitchTrimmed < -maxPitch {
-	// 	set targetPitchTrimmed to -maxPitch.
-	// 	print "targetPitch = " + targetPitch + ", targetPitchTrimmed = " + targetPitchTrimmed.
-	// }
-	
-	
-
 
 	// PID for speed
 	set PspeedPrev to requestedCruiseSpeed - prevSpeed.
@@ -312,22 +335,10 @@ until exit = true{
 	// if kIroll * Iroll < -1 { set Iroll to -1/kIroll. }
 
 	set rollCommand to kProll * Proll + kIroll * Iroll + kDroll * Droll.
-	// print "roll command: " + rollCommand+ ", current: " + ship:facing:roll.
-	
-	if aimAtTarget {
 		
-		// Compute custom heading.
-		
-		set headingTowardTarget to 273.
-		print target:longitude + ", " + target:latitude + ", " + ship:longitude + ", " + ship:latitude.
-		lock steering to heading(headingTowardTarget, targetPitchTrimmed).
-	}
-	else {
-		
-		// Simply apply requested heading.
-		
-		lock steering to heading(requestedHeading, targetPitchTrimmed).
-	}
+	// Simply apply requested heading.
+
+	lock steering to heading(requestedHeading, targetPitchTrimmed).
 	
 	// Speed and Altitude control:
 	// left, right: heading
@@ -352,7 +363,6 @@ until exit = true{
 			}
 			print "New heading: " + requestedHeading.
 		}
-		
 		
 		if ch = "9" {
 			set speedIncrement to 2*speedIncrement.
@@ -406,13 +416,8 @@ until exit = true{
 		}
 		
 		if ch = "t" {
-			if aimAtTarget {
-				print "Set fixed heading : " + requestedHeading.
-			}
-			else {
-				print "Set heading to target.".
-			}
-			set aimAtTarget to not aimAtTarget.
+			// Compute custom heading to go straight to target, following a great circle of the planet.
+			set requestedHeading to getHeadingForTarget().
 		}
 		
 		if ch = "d" {
