@@ -79,21 +79,23 @@ set dt to 0.3.
 // Generic Airliner and Tanker (Cruise: 6000m, 290m/s)
 // set kPalt to 0.08. set kIalt to 0.0006. set kDalt to 0.08.
 
-// Quick
-set kPalt to 0.2. set kIalt to 0.003. set kDalt to 0.8.
 
-set requestedHeading to 180.
-set requestedCruiseSpeed to 900.
-set requestedAlt to 5000.
+set kPalt to 0.08. set kIalt to 0.002. set kDalt to 0.8.
+
+set requestedHeading to 90.
+set requestedCruiseSpeed to 200.
+set requestedAlt to 1000.
 
 
-//set aimAtTarget to false.
+set isFollowingTarget to false.
 
 
 set mustPrintPalt to false.
 
 // set requestedCruiseSpeed to requestedCruiseSpeed.
 print "Target alt: " + requestedAlt + "; speed: " + requestedCruiseSpeed + "; heading: " + requestedHeading.
+
+print "TODO: control vertical speed with PID".
 
 set Ialt to 0.
 set Dalt to 0.
@@ -175,7 +177,7 @@ declare function getHeadingForTarget {
 			set targetHeading to 180 - arcsin(K).
 		}
 		
-		print "K: " + K + ", target heading: " + targetHeading.
+		print "Target heading: " + targetHeading.
 		return targetHeading.
 		
 	}
@@ -335,8 +337,14 @@ until exit = true{
 	// if kIroll * Iroll < -1 { set Iroll to -1/kIroll. }
 
 	set rollCommand to kProll * Proll + kIroll * Iroll + kDroll * Droll.
-		
-	// Simply apply requested heading.
+	
+	
+	if isFollowingTarget {
+		set requestedHeading to getHeadingForTarget().
+	}
+	else {
+		// Simply apply requested heading.
+	}
 
 	lock steering to heading(requestedHeading, targetPitchTrimmed).
 	
@@ -354,6 +362,7 @@ until exit = true{
 			if requestedHeading < 0 {
 				set requestedHeading to requestedHeading + 360.
 			}
+			set requestedHeading to floor(requestedHeading/5) * 5.
 			print "New heading: " + requestedHeading.
 		}
 		if ch = terminal:input:RIGHTCURSORONE {
@@ -361,6 +370,7 @@ until exit = true{
 			if requestedHeading >= 360 {
 				set requestedHeading to requestedHeading - 360.
 			}
+			set requestedHeading to floor(requestedHeading/5) * 5.
 			print "New heading: " + requestedHeading.
 		}
 		
@@ -417,7 +427,17 @@ until exit = true{
 		
 		if ch = "t" {
 			// Compute custom heading to go straight to target, following a great circle of the planet.
-			set requestedHeading to getHeadingForTarget().
+			if isFollowingTarget {
+				// Go back to a keypad-controlled heading
+				set isFollowingTarget to false.
+				set requestedHeading to -ship:bearing.
+				set requestedHeading to floor(requestedHeading/5) * 5.
+				print "Heading set to " + requestedHeading.
+			}
+			else {
+				// set requestedHeading to getHeadingForTarget().
+				set isFollowingTarget to true.
+			}
 		}
 		
 		if ch = "d" {
