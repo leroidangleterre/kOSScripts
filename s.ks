@@ -4,17 +4,6 @@ clearscreen.
 print "Starting.".
 
 
-// Computation of integral term: memorize a table of the latest n values, and give less weight to the oldest ones.
-// Test if that principle can prevent a long overshot, as when the command altitude is way higher than the current one.
-
-
-// Use telemachus to map the ground altitude around Kerbin's equator (can we get the sea depth ?), and the altitude and speed of the aircraft.
-// Map at least one meridian as well; detect the poles to change the target heading.
-// Export also the current fuel amount, fuel consumption and estimated range.
-
-
-// Top perf: 6200m 640m/s
-
 set takeoffSpeed to 80.
 set altitudeIncrement to 10.
 set targetVerticalSpeed to 10.
@@ -22,12 +11,11 @@ set speedIncrement to 10.
 // Cruise speed, requestedAlt and heading are set after the PID coefficients.
 set terrainLatitude to -0.08726.
 set cruiseAltitudeMargin to 100.
+set isDriving to false.
 
 set dHeading to 5.
 
-// set phase to "climb".
 set phase to "cruise".
-// set phase to "takeoff".
 
 sas off.
 
@@ -42,87 +30,43 @@ set remainingFuel to 0.
 
 set dt to 0.3.
 
-// Jumbo90: 0.05 - 0.005 - 0.2
-// Concorde: 0.005 - 0.005 - 0.12
-// Mig: .04 .003 .07 stable at 1936m for 2000m
-
-// Jumbo90p: (.015 .0 .060 stable at 271m for target 1000m; kI .0001 very slow climb)
-// Jumbo90: .012 .0004 .060
-
-// Mig-4: .050 .001 .120; ceiling: 6000m; top speed: mach 4
-
-// A320:
-// .01 .000 .08 stable
-// .015 .0  .15 stable at 1100m for 2000m
-
-
-// PID for altitude
-
-// Tanker with extended payload bay
-// set kPalt to 0.04. set kIalt to 0.0003. set kDalt to 1.0.
-
-// Mach 1
-// set kPalt to 0.05. set kIalt to 0.001. set kDalt to 0.1.
-
-// Bullet
-// set kPalt to 0.027. set kIalt to 0.0008. set kDalt to 0.6.
-
-// Concorde
-// set kPalt to 0.020. set kIalt to 0.0001. set kDalt to 0.05.
-
-// Tanker
-//set kPalt to 0.01. set kIalt to 0.002. set kDalt to 0.9.
-
-// Water 300
-// set kPalt to 0.15. set kIalt to 0.005. set kDalt to 0.2.
-
-// Generic Airliner and Tanker (Cruise: 6000m, 290m/s)
-// set kPalt to 0.08. set kIalt to 0.0006. set kDalt to 0.08.
-
-
-set kPalt to 0.08. set kIalt to 0.002. set kDalt to 0.8.
+// this PID controls vertical speed, or vario
+set kPvario to 0.5. set kIvario to 0.1. set kDvario to 0.5.
 
 set requestedHeading to 90.
-set requestedCruiseSpeed to 200.
-set requestedAlt to 1000.
-
+set requestedCruiseSpeed to 300.
+set requestedAlt to 3300.
+set requestedVario to 0.
 
 set isFollowingTarget to false.
 
 
 set mustPrintPalt to false.
 
-// set requestedCruiseSpeed to requestedCruiseSpeed.
+set timeSinceLastDisplay to 0.
+set timeBetweenDisplays to 3.
+
 print "Target alt: " + requestedAlt + "; speed: " + requestedCruiseSpeed + "; heading: " + requestedHeading.
 
-print "TODO: control vertical speed with PID".
 
-set Ialt to 0.
-set Dalt to 0.
-set PaltPrev to requestedAlt - ship:altitude.
-set prevAlt to 0.
-set tuneLimitAltitude to 100. // 12.
+// PID to control vario
+set Ivario to 0.
+set Dvario to 0.
+set PvarioPrev to requestedVario - ship:verticalspeed.
+set prevVario to 0.
+set tuneLimitVario to 100.
 set targetPitchTrimmed to 0.
 set maxPitch to 70.
+
 
 // PID for horizontal speed
 set kPspeed to 0.060.
 set kIspeed to 0.010.
-set kDspeed to 0.200.
+set kDspeed to 0.300.
 set Ispeed to 0.
 set Dspeed to 0.
 set prevSpeed to 0.
 set tuneSpeedLimit to 1.3.
-
-
-// Concorde: 0.8 - 0.05 - 0.0
-// PID for vertical speed
-set kPvSpeed to 0.900.
-set kIvSpeed to 0.080.
-set kDvSpeed to 0.000.
-set IvSpeed to 0.
-set DvSpeed to 0.
-set prevVspeed to 0.
 
 
 // PID for roll
@@ -135,10 +79,68 @@ set prevRoll to 0.
 
 
 set prevHeading to ship:heading.
-set altitudeList to list().
 set maxLength to 200.
 
 list engines in myEnginesList.
+set remainingFlightDuration to 0.
+set range to 0.
+
+declare function computeVario {
+	parameter currentAltitude.
+	parameter requestedAltitude.
+	
+	set currentError to currentAltitude - requestedAltitude.
+
+	set resultingVario to 0.
+	
+	// 	error:		-200	-100	- 50	- 10	+ 10	+ 50	+100	+200
+	//	Vario:	+30     +15     +5       +2        0      -2     -5      -15      -30
+	set varioA to 1.
+	set varioB to 5.
+	set varioC to 10.
+	set varioD to 15.
+	set varioE to 30.
+	set varioF to 70.
+	
+	if currentError < -2000 {
+		set resultingVario to varioF.
+	}
+	else if currentError < -1000 {
+		set resultingVario to varioE.
+	}
+	else if -1000 < currentError and currentError < -400 {
+		set resultingVario to varioD.
+	}
+	else if -400 < currentError and currentError < -200 {
+		set resultingVario to varioC.
+	}
+	else if -200 < currentError and currentError < -50 {
+		set resultingVario to varioB.
+	}
+	else if -50 < currentError and currentError < -10 {
+		set resultingVario to varioA.
+	}
+	else if -10 < currentError and currentError < 10 {
+		set resultingVario to -0.1 * currentError.
+	}
+	else if 10 < currentError and currentError < 50 {
+		set resultingVario to -varioA.
+	}
+	else if 50 < currentError and currentError < 200 {
+		set resultingVario to -varioB.
+	}
+	else if 200 < currentError and currentError < 400 {
+		set resultingVario to -varioC.
+	}
+	else if 400 < currentError and currentError < 1000 {
+		set resultingVario to -varioD.
+	}
+	else{
+		set resultingVario to -varioE.
+	}
+
+	return resultingVario.
+}
 
 declare function getHeadingForTarget {
 
@@ -177,7 +179,7 @@ declare function getHeadingForTarget {
 			set targetHeading to 180 - arcsin(K).
 		}
 		
-		print "Target heading: " + targetHeading.
+		// print "Target heading: " + targetHeading.
 		return targetHeading.
 		
 	}
@@ -253,7 +255,18 @@ until exit = true{
 		set remainingFlightDuration to remainingFuel / totalFuelFlow.
 		set range to remainingFlightDuration * ship:velocity:surface:mag.
 	}
-
+	
+	set requestedVarioOld to requestedVario.
+	set requestedVario to computeVario(ship:altitude, requestedAlt).
+	
+	if(not isDriving) {
+		if (requestedVarioOld <> requestedVario and abs(requestedVario) >= 1 ){
+			print "Requested vario: " + requestedVario.
+		}else if (abs(requestedVarioOld) >= 1 and abs(requestedVario) < 1) {
+			print "Requested vario: < 1 ".
+		}
+	}
+	
 	if phase = "climb" and ship:altitude > requestedAlt - cruiseAltitudeMargin {
 		print "Target altitude almost reached, starting cruise phase; target altitude: " + requestedAlt + " m, requested speed: " + requestedCruiseSpeed + " m/s.".
 		set phase to "cruise".
@@ -281,29 +294,14 @@ until exit = true{
 		set targetPitch to kPvSpeed * PvSpeed + kIvSpeed * IvSpeed + kDvSpeed * DvSpeed.
 	}
 	else {
-	
-		// PID for altitude
-		set Palt to requestedAlt - ship:altitude.
 		
-		// Initial way to compute integral term:
-		set Ialt to Ialt + Palt*dt.
+		set Pvario to requestedVario - ship:verticalSpeed.
+		set Ivario to Ivario + Pvario*dt.
+		set Dvario to (Pvario - PvarioPrev)/dt.
+		set targetPitch to kPvario*Pvario + kIvario*Ivario + kDvario*Dvario.
 		
-		
-		set Dalt to (Palt - PaltPrev)/dt.
-		
-		
-		if kIalt * Ialt > tuneLimitAltitude { set Ialt to tuneLimitAltitude/kIalt.} // Limit kI*i to [-1, 1] * tuneLimitAltitude
-		if kIalt * Ialt < -tuneLimitAltitude { set Ialt to -tuneLimitAltitude/kIalt.}
-		
-
-		if mustPrintPalt {
-			print "Palt: " + Palt + ", PaltPrev: " + PaltPrev + ", Dalt: " + Dalt.
-		}
-		
-		set targetPitch to kPalt * Palt + kIalt * Ialt + kDalt * Dalt.
-		
-		set prevAlt to ship:altitude.
-		set PaltPrev to requestedAlt - ship:altitude.
+		set prevVario to ship:verticalSpeed.
+		set PvSpeedPrev to requestedVario - ship:verticalSpeed.
 	}
 	set targetPitchTrimmed to targetPitch.
 
@@ -318,8 +316,6 @@ until exit = true{
 	set prevSpeed to ship:velocity:surface:mag.
 	if kIspeed * Ispeed > tuneSpeedLimit { set Ispeed to tuneSpeedLimit/kIspeed. } // Limit kI*i to [-1, 1]
 	if kIspeed * Ispeed < -tuneSpeedLimit { set Ispeed to -tuneSpeedLimit/kIspeed. }
-	
-//	print "Ispeed: " + Ispeed + ", Dspeed: " + Dspeed + ", Pspeed: " + Pspeed.
 
 	set targetThrottle to kPspeed * Pspeed + kIspeed * Ispeed + kDspeed * Dspeed.
 
@@ -327,17 +323,13 @@ until exit = true{
 
 
 	// PID for roll
-	// print "roll: " + ship:facing:roll.
 	set ProllPrev to targetRoll - prevRoll.
 	set Proll to targetRoll - ship:facing:roll.
 	set Iroll to Iroll + Proll*dt.
 	set Droll to (Proll - ProllPrev)/dt.
 	set prevRoll to ship:facing:roll.
-	// if kIroll * Iroll > 1 { set Iroll to 1/kIroll. } // Limit kI*i to [-1, 1]
-	// if kIroll * Iroll < -1 { set Iroll to -1/kIroll. }
 
 	set rollCommand to kProll * Proll + kIroll * Iroll + kDroll * Droll.
-	
 	
 	if isFollowingTarget {
 		set requestedHeading to getHeadingForTarget().
@@ -346,7 +338,13 @@ until exit = true{
 		// Simply apply requested heading.
 	}
 
-	lock steering to heading(requestedHeading, targetPitchTrimmed).
+
+	if isDriving {
+		unlock steering.
+	}
+	else {
+		lock steering to heading(requestedHeading, targetPitchTrimmed).
+	}
 	
 	// Speed and Altitude control:
 	// left, right: heading
@@ -390,28 +388,33 @@ until exit = true{
 			set altitudeIncrement to altitudeIncrement/2.
 			print "altitude increment: " + altitudeIncrement.
 		}
+		if ch = "0" {
+			set isDriving to not isDriving.
+			if isDriving {
+				print "driving mode.".
+			}
+			else {
+				print "flying mode.".
+			}
+		}
 		
 		set altiOrSpeedChanged to false.
 		if ch = terminal:input:DOWNCURSORONE {
 		
-			// set requestedAlt to previous(requestedAlt).
 			set requestedAlt to requestedAlt - altitudeIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		if ch = terminal:input:UPCURSORONE {
 
-			// set requestedAlt to next(requestedAlt).
 			set requestedAlt to requestedAlt + altitudeIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		
 		if ch = "+" {
-			// set requestedCruiseSpeed to next(requestedCruiseSpeed).
 			set requestedCruiseSpeed to requestedCruiseSpeed + speedIncrement.
 			set altiOrSpeedChanged to true.
 		}
 		if ch = "-" {
-			// set requestedCruiseSpeed to previous(requestedCruiseSpeed).
 			set requestedCruiseSpeed to requestedCruiseSpeed - speedIncrement.
 			set altiOrSpeedChanged to true.
 		}
@@ -423,6 +426,11 @@ until exit = true{
 		
 		if ch = "l" {
 			print "Current latitude: " + ship:latitude.
+		}
+		
+		
+		if ch = "v" {
+			print "Current vario: " + ship:verticalSpeed + ", target vario: " + requestedVario.
 		}
 		
 		if ch = "t" {
@@ -437,6 +445,7 @@ until exit = true{
 			else {
 				// set requestedHeading to getHeadingForTarget().
 				set isFollowingTarget to true.
+				print "Follow target.".
 			}
 		}
 		
@@ -444,13 +453,11 @@ until exit = true{
 			print "Estimated flight duration: " + remainingFlightDuration + ", expected range: " + (range/1000) + "km".
 		}
 		if ch = "f" {
-			// print "engine consumption".
 			set currentSpeed to ship:velocity:surface:mag. // speed in m/s
 			set instantFuelConsumption to 0.
 			list engines in engineList.
 			for engine in engineList{
 				set instantFuelConsumption to instantFuelConsumption + engine:fuelFlow.
-				// print "Engine: " + engine:uid + ": flow " + engine:fuelFlow.
 			}
 			if instantFuelConsumption > 0 {
 				set fuelEfficiency to (currentSpeed/instantFuelConsumption).
@@ -477,13 +484,6 @@ until exit = true{
 			
 		}
 		
-		if ch = "i" {
-			// Display the current value of the integral term.
-			print "Ialt: " + Ialt + ", kIalt * Ialt : " + kIalt * Ialt.
-			print "Ispeed: " + Ispeed + ", kIspeed * Ispeed: " + kIspeed * Ispeed.
-			// print "Iroll: " + Iroll+ ", kIroll* Iroll: " + kIroll* Iroll.
-		}
-		
 		if ch = "p" {
 			set mustPrintPalt to not mustPrintPalt.
 		}
@@ -499,4 +499,12 @@ until exit = true{
 	// Wait
 	set now to time:seconds.
 	wait until time:seconds > now + dt.
+	
+	set timeSinceLastDisplay to timeSinceLastDisplay + dt.
+	
+	if timeSinceLastDisplay > timeBetweenDisplays {
+		set timeSinceLastDisplay to 0.
+		// display stuff
+		// print "altitude: " + ship:altitude + ", target: " + requestedAlt + ", requested vario: " + requestedVario + ", currentError: " + currentError.
+	}
 }
