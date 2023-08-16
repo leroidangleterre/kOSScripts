@@ -1,8 +1,11 @@
 
+set customMaxVario to 50.
 
 clearscreen.
 print "Starting.".
 
+// Increase the loading distance.
+set KUNIVERSE:DEFAULTLOADDISTANCE:FLYING:load to 5000.
 
 set takeoffSpeed to 80.
 set altitudeIncrement to 10.
@@ -34,12 +37,13 @@ set dt to 0.3.
 set kPvario to 0.5. set kIvario to 0.1. set kDvario to 0.5.
 
 set requestedHeading to 90.
-set requestedCruiseSpeed to 300.
-set requestedAlt to 3300.
+set requestedCruiseSpeed to 150.
+set requestedAlt to 1000.
 set requestedVario to 0.
+// set isSmoothing to false.
 
 set isFollowingTarget to false.
-
+set distanceToTarget to 0.
 
 set mustPrintPalt to false.
 
@@ -60,9 +64,9 @@ set maxPitch to 70.
 
 
 // PID for horizontal speed
-set kPspeed to 0.060.
-set kIspeed to 0.010.
-set kDspeed to 0.300.
+set kPspeed to 0.05.
+set kIspeed to 0.005.
+set kDspeed to 0.01.
 set Ispeed to 0.
 set Dspeed to 0.
 set prevSpeed to 0.
@@ -83,7 +87,30 @@ set maxLength to 200.
 
 list engines in myEnginesList.
 set remainingFlightDuration to 0.
-set range to 0.
+set currentRange to 0.
+
+set goingToNewVario to false.
+set previousChangeInTargetVario to 0.
+
+declare function computeSmoothedVario {
+	parameter currentAltitude.
+	parameter requestedAltitude.
+	parameter prevVario.
+
+	set theoreticalVario to computeVario(currentAltitude, requestedAltitude).
+	
+	// changeInTargetVario allows the target vario to evolve smoothly over a short period of time
+	set changeInTargetVario to theoreticalVario - prevVario.
+
+	if previousChangeInTargetVario = 0 and changeInTargetVario <> 0{
+		print "		NEW VARIO: " + theoreticalVario.
+	}
+	set previousChangeInTargetVario to changeInTargetVario.
+	set actualRequestedVario to prevVario + changeInTargetVario.
+	
+	return actualRequestedVario.
+}
+	
 
 declare function computeVario {
 	parameter currentAltitude.
@@ -139,6 +166,10 @@ declare function computeVario {
 		set resultingVario to -varioE.
 	}
 
+	if resultingVario > customMaxVario {
+		set resultingVario to customMaxVario.
+	}
+	
 	return resultingVario.
 }
 
@@ -154,13 +185,13 @@ declare function getHeadingForTarget {
 		set TAX to V(-sin(lambdaA), cos(lambdaA), 0).
 		set TAY to V(-sin(phiA)*cos(lambdaA), -sin(phiA)*sin(lambdaA), cos(phiA)).
 		
-		set R to 600000.
+		set Rt to 600000.
 		
 		set PNx to 0.
-		set PNy to R*cos(phiA).
+		set PNy to Rt*cos(phiA).
 		
-		set PBx to -R*cos(lambdaB)*cos(phiB)*sin(lambdaA) + R*sin(lambdaB)*cos(phiB)*cos(lambdaA).
-		set PBy to -R*cos(lambdaB)*cos(phiB)*sin(phiA)*cos(lambdaA) - R*sin(lambdaB)*cos(phiB)*sin(phiA)*sin(lambdaA) + R*sin(phiB)*cos(phiA).
+		set PBx to -Rt*cos(lambdaB)*cos(phiB)*sin(lambdaA) + Rt*sin(lambdaB)*cos(phiB)*cos(lambdaA).
+		set PBy to -Rt*cos(lambdaB)*cos(phiB)*sin(phiA)*cos(lambdaA) - Rt*sin(lambdaB)*cos(phiB)*sin(phiA)*sin(lambdaA) + Rt*sin(phiB)*cos(phiA).
 		
 		
 		set K to PBX / sqrt( PBx*PBx + PBy*PBy).
@@ -187,6 +218,54 @@ declare function getHeadingForTarget {
 		print "No target. Ship current heading: " + (-ship:bearing).
 		return -ship:bearing.
 	}
+}
+
+declare function computeSpeedFromTarget {
+//	TODO need to compute speed for landed, driving and flying targets.
+	set resultSpeed to 0.
+	if hastarget {
+		set prevDistanceToTarget to distanceToTarget.
+		set distanceToTarget to (target:position - ship:position):mag.
+
+		set targetGroundSpeed to target:groundspeed.
+		
+		if ship.status = "LANDED" {
+			set targetGroundSpeed to 0.
+			set resultSpeed to requestedCruiseSpeed.
+			print "follow landed target".
+		}
+		else {	// MOVING TARGET or FLYING SHIP
+			
+			// print "follow flying target. Distance is <" + distanceToTarget + ">".
+			if distanceToTarget < 100 {
+				// We now are close to target
+				if target.status = "FLYING" {
+					set resultSpeed to targetGroundSpeed.
+				}
+				// keep current speed if target is landed.
+				if prevDistanceToTarget > distanceToTarget {
+					brakes on.
+				}
+				else {
+					brakes off.
+				}
+			}
+			else if distanceToTarget < 300 {
+				set resultSpeed to targetGroundSpeed + 5.
+			}
+			else {
+				set resultSpeed to targetGroundSpeed + 10.
+			}
+			// print "	target ground speed: " + resultSpeed.
+		}
+		// print "requested speed: " + resultSpeed.
+	}
+	else {
+		// Default speed requested by user.
+		set resultSpeed to requestedCruiseSpeed.
+	}
+	
+	return resultSpeed.
 }
 
 declare function next {
@@ -236,6 +315,25 @@ declare function previous {
 	return newX.
 }
 
+// Set the wheel steer to turn the aircraft toward 'requestedHeading'.
+declare function computeSteerFromHeading {
+	
+	if isFollowingTarget and HASTARGET {
+		// print "following target".
+		set requiredBearing to target:bearing.
+	}
+	else {
+		set requiredBearing to requestedHeading + ship:bearing.
+		if requiredBearing > 180 {
+			set requiredBearing to requiredBearing - 360.
+		}
+	}	
+
+	//print "requested heading: " + requestedHeading.
+	//print "currentHeading: " + (-ship:bearing).
+	// print "requiredBearing: " + requiredBearing.
+	return -requiredBearing / 100.
+}
 
 set exit to false.
 until exit = true{
@@ -253,19 +351,20 @@ until exit = true{
 	}
 	if totalFuelFlow <> 0 {
 		set remainingFlightDuration to remainingFuel / totalFuelFlow.
-		set range to remainingFlightDuration * ship:velocity:surface:mag.
+		set currentRange to remainingFlightDuration * ship:velocity:surface:mag.
 	}
 	
 	set requestedVarioOld to requestedVario.
-	set requestedVario to computeVario(ship:altitude, requestedAlt).
+	set requestedVario to computeSmoothedVario(ship:altitude, requestedAlt, requestedVarioOld).
 	
-	if(not isDriving) {
-		if (requestedVarioOld <> requestedVario and abs(requestedVario) >= 1 ){
-			print "Requested vario: " + requestedVario.
-		}else if (abs(requestedVarioOld) >= 1 and abs(requestedVario) < 1) {
-			print "Requested vario: < 1 ".
-		}
-	}
+	
+	// if(not isDriving and not isSmoothing) {
+	// 	if (requestedVarioOld <> requestedVario and abs(requestedVario) >= 1 ){
+	// 		print "Requested vario: " + requestedVario.
+	// 	}else if (abs(requestedVarioOld) >= 1 and abs(requestedVario) < 1) {
+	// 		print "Requested vario: < 1 ".
+	// 	}
+	// }
 	
 	if phase = "climb" and ship:altitude > requestedAlt - cruiseAltitudeMargin {
 		print "Target altitude almost reached, starting cruise phase; target altitude: " + requestedAlt + " m, requested speed: " + requestedCruiseSpeed + " m/s.".
@@ -333,11 +432,25 @@ until exit = true{
 	
 	if isFollowingTarget {
 		set requestedHeading to getHeadingForTarget().
+		set requestedCruiseSpeed to computeSpeedFromTarget().
 	}
 	else {
 		// Simply apply requested heading.
 	}
 
+	// When changing directions on land, we must act on the wheel
+	if ship:status = "LANDED" {
+		// print "ship must turn on the ground.".
+		if ship:groundspeed < 50 {
+			// print "current yaw: " + ship:control:yaw.
+			set commandSteer to computeSteerFromHeading().
+			// print "	command steer: " + commandSteer.
+			set ship:control:wheelsteer to commandSteer.
+		}
+		else {
+			set ship:control:wheelsteer to 0.
+		}
+	}
 
 	if isDriving {
 		unlock steering.
@@ -435,22 +548,24 @@ until exit = true{
 		
 		if ch = "t" {
 			// Compute custom heading to go straight to target, following a great circle of the planet.
-			if isFollowingTarget {
+			print "1.".
+			if HASTARGET and not isFollowingTarget {
+				// set requestedHeading to getHeadingForTarget().
+				set isFollowingTarget to true.
+				print "Follow target: " + target.
+			}
+			else {
 				// Go back to a keypad-controlled heading
 				set isFollowingTarget to false.
 				set requestedHeading to -ship:bearing.
 				set requestedHeading to floor(requestedHeading/5) * 5.
-				print "Heading set to " + requestedHeading.
-			}
-			else {
-				// set requestedHeading to getHeadingForTarget().
-				set isFollowingTarget to true.
-				print "Follow target.".
+				// print "requested heading : " + requestedHeading.
+				// print "current heading : " + requestedHeading.
 			}
 		}
 		
 		if ch = "d" {
-			print "Estimated flight duration: " + remainingFlightDuration + ", expected range: " + (range/1000) + "km".
+			print "Estimated flight duration: " + remainingFlightDuration + ", expected currentRange: " + (currentRange/1000) + "km".
 		}
 		if ch = "f" {
 			set currentSpeed to ship:velocity:surface:mag. // speed in m/s
@@ -508,3 +623,6 @@ until exit = true{
 		// print "altitude: " + ship:altitude + ", target: " + requestedAlt + ", requested vario: " + requestedVario + ", currentError: " + currentError.
 	}
 }
+
+
+set ship:control:wheelsteer to 0.
