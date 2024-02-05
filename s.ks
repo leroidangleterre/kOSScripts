@@ -1,5 +1,98 @@
 
-set customMaxVario to 50.
+// Create the GUI
+
+LOCAL my_gui IS GUI(300,150).
+set isGuiVisible to true.
+
+// Add widgets to the GUI
+
+LOCAL airSpeedBox is my_gui:addHBox().
+
+LOCAL label IS airSpeedBox:ADDLABEL("Airspeed").
+SET label:STYLE:ALIGN TO "LEFT".
+
+LOCAL speedTextField TO airSpeedBox:ADDTEXTFIELD("").
+SET speedTextField:STYLE:ALIGN TO "RIGHT".
+SET speedTextField:STYLE:HSTRETCH TO True.
+set speedTextField:style:width to 60.
+
+set speedTextField:onConfirm to {
+	parameter str.
+	set convertedVal to str:toNumber(-9999).
+	if convertedVal = -9999 {
+		print "error in speed conversion, setting speed to " + requestedCruiseSpeed.
+		set convertedVal to requestedCruiseSpeed.
+	}
+	print "speed confirmation: " + convertedVal.
+	set requestedCruiseSpeed to convertedVal.
+	set speedTextField:text to "" + requestedCruiseSpeed.
+}.
+
+
+LOCAL altitudeBox is my_gui:addHBox().
+
+LOCAL label IS altitudeBox:ADDLABEL("Altitude").
+SET label:STYLE:ALIGN TO "LEFT".
+LOCAL altitudeTextField TO altitudeBox:ADDTEXTFIELD("").
+SET altitudeTextField:STYLE:ALIGN TO "RIGHT".
+SET altitudeTextField:STYLE:HSTRETCH TO True.
+set altitudeTextField:style:width to 60.
+set altitudeTextField:onConfirm to {
+	parameter str.
+	set convertedVal to str:toNumber(-9999).
+	if convertedVal = -9999 {
+		print "error in altitude conversion, setting altitude to " + requestedAlt.
+		set convertedVal to requestedAlt.
+	}
+	print "altitude confirmation: " + convertedVal.
+	set requestedAlt to convertedVal.
+	set altitudeTextField:text to "" + requestedAlt.
+}.
+
+LOCAL headingBox is my_gui:addHBox().
+
+LOCAL label IS headingBox:ADDLABEL("Heading").
+SET label:STYLE:ALIGN TO "LEFT".
+
+local headingLeftButton to headingBox:addButton("Left").
+SET headingLeftButton:STYLE:ALIGN TO "LEFT".
+SET headingLeftButton:STYLE:HSTRETCH TO False.
+set headingLeftButton:style:width to 60.
+set headingLeftButton:onClick to {
+	increaseHeading(-5).
+}.
+
+LOCAL headingTextField TO headingBox:ADDTEXTFIELD("").
+SET headingTextField:STYLE:ALIGN TO "CENTER".
+SET headingTextField:STYLE:HSTRETCH TO False.
+set headingTextField:style:width to 60.
+
+local headingRightButton to headingBox:addButton("Right").
+SET headingRightButton:STYLE:ALIGN TO "RIGHT".
+SET headingRightButton:STYLE:HSTRETCH TO False.
+set headingRightButton:style:width to 60.
+set headingRightButton:onClick to {
+	increaseHeading(5).
+}.
+
+
+// Show the GUI.
+my_gui:SHOW().
+
+// Handle GUI widget interactions.
+LOCAL isDone IS FALSE.
+
+
+
+
+
+// END GUI
+
+set standardMaxVario to 45.
+set extendedMaxVario to 70.
+set speedForExtendedVario to 200.
+set currentMaxVario to 0.
+set varioSmoothingRate to 2.
 
 clearscreen.
 print "Starting.".
@@ -9,18 +102,22 @@ set KUNIVERSE:DEFAULTLOADDISTANCE:FLYING:load to 5000.
 
 set takeoffSpeed to 80.
 set altitudeIncrement to 10.
-set targetVerticalSpeed to 10.
+//set targetVerticalSpeed to 10.
 set speedIncrement to 10.
 // Cruise speed, requestedAlt and heading are set after the PID coefficients.
 set terrainLatitude to -0.08726.
+set terrainLongitude to -74.623. // west; east: -74.580
+set terrainAltitude to 70.
 set cruiseAltitudeMargin to 100.
 set isDriving to false.
+set isGoingHome to false.
 
 set dHeading to 5.
 
 set phase to "cruise".
 
 sas off.
+brakes off.
 
 set targetPitch to 90.
 
@@ -37,8 +134,11 @@ set dt to 0.3.
 set kPvario to 0.5. set kIvario to 0.1. set kDvario to 0.5.
 
 set requestedHeading to 90.
+set headingTextField:text to "" + requestedHeading.
 set requestedCruiseSpeed to 150.
+set speedTextField:text to "" + requestedCruiseSpeed.
 set requestedAlt to 1000.
+set altitudeTextField:text to "" + requestedAlt.
 set requestedVario to 0.
 // set isSmoothing to false.
 
@@ -64,9 +164,9 @@ set maxPitch to 70.
 
 
 // PID for horizontal speed
-set kPspeed to 0.05.
-set kIspeed to 0.005.
-set kDspeed to 0.01.
+set kPspeed to 0.035.
+set kIspeed to 0.0035.
+set kDspeed to 0.12. // 0.07.
 set Ispeed to 0.
 set Dspeed to 0.
 set prevSpeed to 0.
@@ -95,22 +195,30 @@ set previousChangeInTargetVario to 0.
 declare function computeSmoothedVario {
 	parameter currentAltitude.
 	parameter requestedAltitude.
-	parameter prevVario.
+	parameter requestedVarioOld.
 
-	set theoreticalVario to computeVario(currentAltitude, requestedAltitude).
+	set roughVario to computeVario(currentAltitude, requestedAltitude).
 	
-	// changeInTargetVario allows the target vario to evolve smoothly over a short period of time
-	set changeInTargetVario to theoreticalVario - prevVario.
-
-	if previousChangeInTargetVario = 0 and changeInTargetVario <> 0{
-		print "		NEW VARIO: " + theoreticalVario.
+	set isVarioNew to false.
+	
+	if roughVario > requestedVarioOld + varioSmoothingRate {
+		set varioSmoothed to requestedVarioOld + varioSmoothingRate.
 	}
-	set previousChangeInTargetVario to changeInTargetVario.
-	set actualRequestedVario to prevVario + changeInTargetVario.
+	else if roughVario < requestedVarioOld - varioSmoothingRate {
+		set varioSmoothed to requestedVarioOld - varioSmoothingRate.
+	}
+	else {
+		set varioSmoothed to roughVario.
+		if roughVario <> requestedVarioOld and abs(roughVario) >= 1{
+			print "final vario: " + varioSmoothed.
+		}
+	}
 	
-	return actualRequestedVario.
+	if abs(varioSmoothed) > 1 and varioSmoothed <> roughVario {
+		print "smoothed vario: " + varioSmoothed.
+	}
+	return varioSmoothed.
 }
-	
 
 declare function computeVario {
 	parameter currentAltitude.
@@ -127,7 +235,15 @@ declare function computeVario {
 	set varioC to 10.
 	set varioD to 15.
 	set varioE to 30.
-	set varioF to 70.
+//	set varioF to 70.
+	
+	
+	if ship:velocity:surface:mag > speedForExtendedVario {
+		set varioF to extendedMaxVario.
+	}
+	else {
+		set varioF to standardMaxVario.
+	}
 	
 	if currentError < -2000 {
 		set resultingVario to varioF.
@@ -162,15 +278,34 @@ declare function computeVario {
 	else if 400 < currentError and currentError < 1000 {
 		set resultingVario to -varioD.
 	}
-	else{
+	else if 1000 < currentError and currentError < 2000 {
 		set resultingVario to -varioE.
 	}
-
-	if resultingVario > customMaxVario {
-		set resultingVario to customMaxVario.
+	else{
+		set resultingVario to -varioF.
 	}
 	
+	// Requested vario will not excess limit.
+	if resultingVario > varioF {
+		set resultingVario to varioF.
+		print "excess vario (l.198)".
+	}
 	return resultingVario.
+}
+
+declare function increaseHeading {
+	parameter dHeading.
+
+	set requestedHeading to requestedHeading + dHeading.
+	if requestedHeading < 0 {
+		set requestedHeading to requestedHeading + 360.
+	}
+	if requestedHeading >= 360 {
+		set requestedHeading to requestedHeading - 360.
+	}
+	set requestedHeading to floor(requestedHeading/5) * 5.
+	print "New heading: " + requestedHeading.
+	set headingTextField:text to "" + requestedHeading.
 }
 
 declare function getHeadingForTarget {
@@ -229,20 +364,29 @@ declare function computeSpeedFromTarget {
 
 		set targetGroundSpeed to target:groundspeed.
 		
-		if ship.status = "LANDED" {
-			set targetGroundSpeed to 0.
-			set resultSpeed to requestedCruiseSpeed.
+		print "targetGroundSpeed : " + targetGroundSpeed.
+		if targetGroundSpeed < 1 {
+			set targetIsGrounded to true.
+		}
+		else {
+			set targetIsGrounded to false.
+		}
+		
+		if ship.status = "LANDED" or targetIsGrounded{
+		
 			print "follow landed target".
+			set resultSpeed to requestedCruiseSpeed.
 		}
 		else {	// MOVING TARGET or FLYING SHIP
 			
-			// print "follow flying target. Distance is <" + distanceToTarget + ">".
+			print "follow flying target".
+			
 			if distanceToTarget < 100 {
 				// We now are close to target
-				if target.status = "FLYING" {
+				if not targetIsGrounded {
 					set resultSpeed to targetGroundSpeed.
 				}
-				// keep current speed if target is landed.
+
 				if prevDistanceToTarget > distanceToTarget {
 					brakes on.
 				}
@@ -335,6 +479,14 @@ declare function computeSteerFromHeading {
 	return -requiredBearing / 100.
 }
 
+
+// Determine in which sector the plane currently is, relative to a given runway.
+declare function getApproachSector {
+	
+	return "E".
+}
+
+
 set exit to false.
 until exit = true{
 
@@ -356,52 +508,45 @@ until exit = true{
 	
 	set requestedVarioOld to requestedVario.
 	set requestedVario to computeSmoothedVario(ship:altitude, requestedAlt, requestedVarioOld).
+
 	
-	
-	// if(not isDriving and not isSmoothing) {
-	// 	if (requestedVarioOld <> requestedVario and abs(requestedVario) >= 1 ){
-	// 		print "Requested vario: " + requestedVario.
-	// 	}else if (abs(requestedVarioOld) >= 1 and abs(requestedVario) < 1) {
-	// 		print "Requested vario: < 1 ".
-	// 	}
-	// }
-	
-	if phase = "climb" and ship:altitude > requestedAlt - cruiseAltitudeMargin {
-		print "Target altitude almost reached, starting cruise phase; target altitude: " + requestedAlt + " m, requested speed: " + requestedCruiseSpeed + " m/s.".
-		set phase to "cruise".
-		// set requestedCruiseSpeed to requestedCruiseSpeed.
-	}
-	else if phase = "takeoff" {
-		// Gain speed
-		brakes off.
-		print "Takeoff, speed " + ship:velocity:surface:mag + ", aiming for " + takeoffSpeed.
-		if ship:velocity:surface:mag > takeoffSpeed {
-			print "Reaching almost takeoff speed".
-			set phase to "climb".
-		}
-	}
-	else if phase = "climb" {
-		print "climb".
-		// PID for vertical speed
-		set PvSpeedPrev to targetVerticalSpeed - prevVspeed.
-		set PvSpeed to targetVerticalSpeed - ship:verticalSpeed.
-		set IvSpeed to IvSpeed + PvSpeed*dt.
-		set DvSpeed to (PvSpeed - PvSpeedPrev)/dt.
-		set prevVspeed to ship:verticalSpeed.
-		// TODO: if kIalt * Ialt > tuneLimitAltitude { set Ialt to tuneLimitAltitude/kIalt.} // Limit kI*i to [-1, 1] * tuneLimitAltitude
-		// TODO: if kIalt * Ialt < -tuneLimitAltitude { set Ialt to -tuneLimitAltitude/kIalt.}
-		set targetPitch to kPvSpeed * PvSpeed + kIvSpeed * IvSpeed + kDvSpeed * DvSpeed.
-	}
-	else {
+	//if phase = "climb" and ship:altitude > requestedAlt - cruiseAltitudeMargin {
+	//	print "Target altitude almost reached, starting cruise phase; target altitude: " + requestedAlt + " m, requested speed: " + requestedCruiseSpeed + " m/s.".
+	//	set phase to "cruise".
+	//	// set requestedCruiseSpeed to requestedCruiseSpeed.
+	//}
+	//else if phase = "takeoff" {
+	//	// Gain speed
+	//	brakes off.
+	//	print "Takeoff, speed " + ship:velocity:surface:mag + ", aiming for " + takeoffSpeed.
+	//	if ship:velocity:surface:mag > takeoffSpeed {
+	//		print "Reaching almost takeoff speed".
+	//		set phase to "climb".
+	//	}
+	//}
+	//else if phase = "climb" {
+	//	print "climb".
+	//	// PID for vertical speed
+	//	set PvSpeedPrev to targetVerticalSpeed - prevVspeed.
+	//	set PvSpeed to targetVerticalSpeed - ship:verticalSpeed.
+	//	set IvSpeed to IvSpeed + PvSpeed*dt.
+	//	set DvSpeed to (PvSpeed - PvSpeedPrev)/dt.
+	//	set prevVspeed to ship:verticalSpeed.
+	//	// TODO: if kIalt * Ialt > tuneLimitAltitude { set Ialt to tuneLimitAltitude/kIalt.} // Limit kI*i to [-1, 1] * tuneLimitAltitude
+	//	// TODO: if kIalt * Ialt < -tuneLimitAltitude { set Ialt to -tuneLimitAltitude/kIalt.}
+	//	set targetPitch to kPvSpeed * PvSpeed + kIvSpeed * IvSpeed + kDvSpeed * DvSpeed.
+	//}
+	//else {
 		
-		set Pvario to requestedVario - ship:verticalSpeed.
-		set Ivario to Ivario + Pvario*dt.
-		set Dvario to (Pvario - PvarioPrev)/dt.
-		set targetPitch to kPvario*Pvario + kIvario*Ivario + kDvario*Dvario.
-		
-		set prevVario to ship:verticalSpeed.
-		set PvSpeedPrev to requestedVario - ship:verticalSpeed.
-	}
+	set Pvario to requestedVario - ship:verticalSpeed.
+	set Ivario to Ivario + Pvario*dt.
+	set Dvario to (Pvario - PvarioPrev)/dt.
+	set targetPitch to kPvario*Pvario + kIvario*Ivario + kDvario*Dvario.
+	
+	set prevVario to ship:verticalSpeed.
+	set PvSpeedPrev to requestedVario - ship:verticalSpeed.
+
+	//}
 	set targetPitchTrimmed to targetPitch.
 
 	// PID for speed
@@ -469,12 +614,7 @@ until exit = true{
 	if terminal:input:haschar {
 		set ch to terminal:input:getchar().
 		if ch = terminal:input:LEFTCURSORONE {
-			set requestedHeading to requestedHeading - dHeading.
-			if requestedHeading < 0 {
-				set requestedHeading to requestedHeading + 360.
-			}
-			set requestedHeading to floor(requestedHeading/5) * 5.
-			print "New heading: " + requestedHeading.
+			decreaseHeading().
 		}
 		if ch = terminal:input:RIGHTCURSORONE {
 			set requestedHeading to requestedHeading + dHeading.
@@ -483,6 +623,7 @@ until exit = true{
 			}
 			set requestedHeading to floor(requestedHeading/5) * 5.
 			print "New heading: " + requestedHeading.
+			set headingTextField:text to "" + requestedHeading.
 		}
 		
 		if ch = "9" {
@@ -516,29 +657,29 @@ until exit = true{
 		
 			set requestedAlt to requestedAlt - altitudeIncrement.
 			set altiOrSpeedChanged to true.
+			set altitudeTextField:text to ""+ requestedAlt.
 		}
 		if ch = terminal:input:UPCURSORONE {
 
 			set requestedAlt to requestedAlt + altitudeIncrement.
 			set altiOrSpeedChanged to true.
+			set altitudeTextField:text to "" + requestedAlt.
 		}
 		
 		if ch = "+" {
 			set requestedCruiseSpeed to requestedCruiseSpeed + speedIncrement.
 			set altiOrSpeedChanged to true.
+			set speedTextField:text to "" + requestedCruiseSpeed.
 		}
 		if ch = "-" {
 			set requestedCruiseSpeed to requestedCruiseSpeed - speedIncrement.
 			set altiOrSpeedChanged to true.
+			set speedTextField:text to "" + requestedCruiseSpeed.
 		}
 		
 		
 		if altiOrSpeedChanged {
 			print "Target altitude : " + requestedAlt + "m; target speed: " + requestedCruiseSpeed + "m/s.".
-		}
-		
-		if ch = "l" {
-			print "Current latitude: " + ship:latitude.
 		}
 		
 		
@@ -548,7 +689,6 @@ until exit = true{
 		
 		if ch = "t" {
 			// Compute custom heading to go straight to target, following a great circle of the planet.
-			print "1.".
 			if HASTARGET and not isFollowingTarget {
 				// set requestedHeading to getHeadingForTarget().
 				set isFollowingTarget to true.
@@ -559,7 +699,7 @@ until exit = true{
 				set isFollowingTarget to false.
 				set requestedHeading to -ship:bearing.
 				set requestedHeading to floor(requestedHeading/5) * 5.
-				// print "requested heading : " + requestedHeading.
+				print "No target. Requested heading : " + requestedHeading.
 				// print "current heading : " + requestedHeading.
 			}
 		}
@@ -594,17 +734,77 @@ until exit = true{
 			}
 		}
 		
-		if ch = "w" {
-			// Align on the runway facing west in preparation for landing.
+		if ch = "h" {
+			set isGoingHome to not isGoingHome.
 			
+			if isGoingHome {
+				// Align on the runway facing west in preparation for landing.
+				print "going home.".
+			}
+			else {
+				print "Not going home yet.".
+			}
 		}
 		
-		if ch = "p" {
-			set mustPrintPalt to not mustPrintPalt.
+		if isGoingHome {
+			// override altitude and heading commands
+			set currentSector to getApproachSector().
+			
+			if currentSector = "A" {
+				set latitudeDifference to ship:latitude - terrainLatitude.
+				set targetHeading to 90 + latitudeDifference.
+				set requestedAlt to terrainAltitude + 200.
+			}
+			else if currentSector = "B" {
+				if ship:latitude > terrainLatitude {
+					// B north
+					set targetHeading to 135.
+				}
+				else {
+					// B south
+					set targetHeading to 45.
+				}
+				set requestedAlt to terrainAltitude + 400.
+			}
+			else if currentSector = "C" {
+				set targetHeading to 270.
+				set requestedAlt to terrainAltitude + 600.
+			}
+			else if currentSector = "D" {
+				if ship:latitude > terrainLatitude {
+					// D north
+					set targetHeading to 0.
+				}
+				else {
+					// D south
+					set targetHeading to 180.
+				}
+				set requestedAlt to terrainAltitude + 600.
+			}
+			else if currentSector = "E" {
+				// go for landing
+			}
+		}
+		
+		if ch = "l" {
+			print "Current latitude: " + ship:latitude.
+			print "Current longitude: " + ship:longitude.
+		}
+		
+		if ch = "w" {
+			// Toggle GUI
+			if isGuiVisible {
+				my_gui:HIDE().
+			}
+			else {
+				my_gui:SHOW().
+			}
+			set isGuiVisible to not isGuiVisible.
 		}
 		
 		if ch = "q" {
 			print "Exit.".
+			my_gui:HIDE().
 			sas on.
 			set exit to true.
 		}
